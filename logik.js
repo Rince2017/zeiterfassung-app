@@ -74,6 +74,47 @@
     return pad(+m[1]) + ":" + m[2];
   }
 
+  /** Freie Eingabe wie "9", "15", "915", "1500", "15:30", "15.30" -> "HH:MM"; "" bei leer, null bei ungültig. */
+  function parseZeitEingabe(s) {
+    s = (s || "").trim();
+    if (!s) return "";
+    let h, m;
+    let t = /^(\d{1,2})[:.,](\d{1,2})$/.exec(s);
+    if (t) { h = +t[1]; m = +t[2]; }
+    else if (/^\d{1,2}$/.test(s)) { h = +s; m = 0; }
+    else if (/^\d{3,4}$/.test(s)) { h = +s.slice(0, -2); m = +s.slice(-2); }
+    else return null;
+    if (h > 23 || m > 59) return null;
+    return pad(h) + ":" + pad(m);
+  }
+
+  /** Eine Zeit um einen Schritt (1, 15 oder 30 Minuten) verändern. richtung: +1, -1 oder 0 (nur auf den Schritt abrunden).
+      Bei Schritt > 1 wird auf das nächste Vielfache gerundet; über Mitternacht läuft die Uhr herum. */
+  function zeitSchritt(wert, richtung, schritt) {
+    let m = minuten(wert);
+    if (schritt <= 1) m += richtung;
+    else {
+      const rest = m % schritt;
+      if (richtung > 0) m += schritt - rest;
+      else if (richtung < 0) m -= rest || schritt;
+      else m -= rest;
+    }
+    m = ((m % 1440) + 1440) % 1440;
+    return pad(Math.floor(m / 60)) + ":" + pad(m % 60);
+  }
+
+  /** Minutenwert (z. B. Pause) um einen Schritt verändern, nie unter 0. */
+  function minutenSchritt(wert, richtung, schritt) {
+    let m = Math.max(parseInt(wert, 10) || 0, 0);
+    if (schritt <= 1) m += richtung;
+    else {
+      const rest = m % schritt;
+      if (richtung > 0) m += schritt - rest;
+      else if (richtung < 0) m -= rest || schritt;
+    }
+    return Math.max(m, 0);
+  }
+
   function minuten(z) {
     const p = z.split(":");
     return +p[0] * 60 + +p[1];
@@ -284,7 +325,7 @@
   return {
     SPALTEN, KUERZEL, WOCHENTAGE, FRIST_TAGE, ZETTEL_CSS,
     esc, pad, heuteIso, jetztHhmm, istDatum, addTage, tageZwischen, wochentag, tageImMonat,
-    normZeit, minuten, dauerMin, hhmm, datumDe, verspaetet, sortiere, imMonat,
+    normZeit, parseZeitEingabe, zeitSchritt, minutenSchritt, minuten, dauerMin, hhmm, datumDe, verspaetet, sortiere, imMonat,
     zusammenfuehren, parseCsv, toCsv, neueId, zeilenDaten, zeilenHtml, zettelHtml,
   };
 });

@@ -68,6 +68,9 @@ input, select, textarea {
   font: inherit; width: 100%; min-height: 48px; padding: 8px 12px; border-radius: 10px;
   border: 1px solid var(--linie); background: var(--bg); color: var(--text);
 }
+.stepper { display: flex; gap: 8px; }
+.stepper button { flex: 0 0 64px; padding: 0; font-size: 26px; }
+.stepper input { flex: 1 1 auto; min-width: 0; text-align: center; font-size: 22px; font-variant-numeric: tabular-nums; }
 .paar { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 nav {
   position: fixed; left: 0; right: 0; bottom: 0; display: flex; background: var(--karte);
@@ -114,14 +117,32 @@ dialog::backdrop { background: rgba(0, 0, 0, .5); }
   <h1 id="form-titel">Eintrag</h1>
   <label for="f-datum">Datum</label>
   <input id="f-datum" type="date">
-  <div class="paar">
-    <div><label for="f-beginn">Beginn</label><input id="f-beginn" type="time"></div>
-    <div><label for="f-ende">Ende</label><input id="f-ende" type="time"></div>
+  <label>Minutenschritt für − / +</label>
+  <div class="reihe" id="schritt-chips">
+    <button class="chip" data-aktion="schritt-wahl" data-wert="1">1 min</button>
+    <button class="chip" data-aktion="schritt-wahl" data-wert="15">15 min</button>
+    <button class="chip" data-aktion="schritt-wahl" data-wert="30">30 min</button>
   </div>
-  <div class="paar">
-    <div><label for="f-pause">Pause (Minuten)</label><input id="f-pause" type="number" inputmode="numeric" min="0" step="1"></div>
-    <div><label for="f-kuerzel">Kürzel</label><select id="f-kuerzel"></select></div>
+  <label for="f-beginn">Beginn</label>
+  <div class="stepper">
+    <button type="button" tabindex="-1" data-aktion="zeit-schritt" data-feld="f-beginn" data-wert="-1" aria-label="Beginn früher">−</button>
+    <input id="f-beginn" class="zeit" type="text" inputmode="numeric" placeholder="––:––" autocomplete="off" maxlength="5">
+    <button type="button" tabindex="-1" data-aktion="zeit-schritt" data-feld="f-beginn" data-wert="1" aria-label="Beginn später">+</button>
   </div>
+  <label for="f-ende">Ende</label>
+  <div class="stepper">
+    <button type="button" tabindex="-1" data-aktion="zeit-schritt" data-feld="f-ende" data-wert="-1" aria-label="Ende früher">−</button>
+    <input id="f-ende" class="zeit" type="text" inputmode="numeric" placeholder="––:––" autocomplete="off" maxlength="5">
+    <button type="button" tabindex="-1" data-aktion="zeit-schritt" data-feld="f-ende" data-wert="1" aria-label="Ende später">+</button>
+  </div>
+  <label for="f-pause">Pause (Minuten)</label>
+  <div class="stepper">
+    <button type="button" tabindex="-1" data-aktion="pause-schritt" data-wert="-1" aria-label="Pause kürzer">−</button>
+    <input id="f-pause" type="number" inputmode="numeric" min="0" step="1">
+    <button type="button" tabindex="-1" data-aktion="pause-schritt" data-wert="1" aria-label="Pause länger">+</button>
+  </div>
+  <label for="f-kuerzel">Kürzel</label>
+  <select id="f-kuerzel"></select>
   <label for="f-bemerkung">Bemerkung</label>
   <input id="f-bemerkung" type="text" autocomplete="off">
   <label for="f-aufgezeichnet">Aufgezeichnet am</label>
@@ -144,8 +165,8 @@ dialog::backdrop { background: rgba(0, 0, 0, .5); }
 
 <input id="datei" type="file" accept=".csv,text/csv,text/plain" hidden>
 
-<script src="logik.js?v=3"></script>
-<script src="pdf.js?v=3"></script>
+<script src="logik.js?v=4"></script>
+<script src="pdf.js?v=4"></script>
 <script>
 "use strict";
 const Z = window.Zeit;
@@ -154,7 +175,7 @@ const MONATE = ["Januar", "Februar", "März", "April", "Mai", "Juni", "Juli", "A
 
 const state = {
   eintraege: [],
-  einst: { name: "", firma: "", pers_nr: "", letzteSicherung: "" },
+  einst: { name: "", firma: "", pers_nr: "", letzteSicherung: "", schritt: 15 },
   ansicht: "heute",
   monat: Z.heuteIso().slice(0, 7),
   formularId: null,
@@ -359,6 +380,39 @@ async function setzePause(wert) {
   render();
 }
 
+function schritt() { return [1, 15, 30].indexOf(state.einst.schritt) >= 0 ? state.einst.schritt : 15; }
+
+function schrittAnzeigen() {
+  document.querySelectorAll("#schritt-chips .chip").forEach((b) => b.classList.toggle("an", Number(b.dataset.wert) === schritt()));
+}
+
+/** Startwert eines leeren Zeitfelds: beim Ende der Beginn, sonst die aktuelle Zeit auf den Schritt abgerundet. */
+function zeitBasis(feld) {
+  if (feld === "f-ende") {
+    const b = Z.parseZeitEingabe($("f-beginn").value);
+    if (b) return b;
+  }
+  return Z.zeitSchritt(Z.jetztHhmm(), 0, schritt());
+}
+
+/** Liest ein Zeitfeld: "" = leer, null = ungültig. Ein nur vorgeschlagener, unveränderter Wert zählt als leer. */
+function zeitLesen(feld) {
+  const el = $(feld);
+  return el.dataset.vorschlag === "1" ? "" : Z.parseZeitEingabe(el.value);
+}
+
+function zeitSchrittAusfuehren(feld, richtung) {
+  const el = $(feld);
+  const aktuell = Z.parseZeitEingabe(el.value);
+  if (aktuell === null) { toast("Bitte die Uhrzeit im Format 15:30 eingeben."); return; }
+  el.value = aktuell ? Z.zeitSchritt(aktuell, richtung, schritt()) : zeitBasis(feld);
+  el.dataset.vorschlag = "0";
+}
+
+function pauseSchrittAusfuehren(richtung) {
+  $("f-pause").value = Z.minutenSchritt($("f-pause").value, richtung, schritt());
+}
+
 function formularOeffnen(id, vorgabeDatum) {
   const e = id ? state.eintraege.find((x) => x.id === id) : null;
   state.formularId = e ? e.id : null;
@@ -366,6 +420,8 @@ function formularOeffnen(id, vorgabeDatum) {
   $("f-datum").value = e ? e.datum : vorgabeDatum || Z.heuteIso();
   $("f-beginn").value = e ? e.beginn : "";
   $("f-ende").value = e ? e.ende : "";
+  $("f-beginn").dataset.vorschlag = $("f-ende").dataset.vorschlag = "0";
+  schrittAnzeigen();
   $("f-pause").value = e ? e.pause_min || "0" : "0";
   $("f-bemerkung").value = e ? e.bemerkung : "";
   $("f-aufgezeichnet").value = e ? e.aufgezeichnet_am : Z.heuteIso();
@@ -385,8 +441,8 @@ function formularFehler(text) {
 
 async function formularSpeichern() {
   const datum = $("f-datum").value;
-  const beginn = Z.normZeit($("f-beginn").value);
-  const ende = Z.normZeit($("f-ende").value);
+  const beginn = zeitLesen("f-beginn");
+  const ende = zeitLesen("f-ende");
   const kuerzel = $("f-kuerzel").value;
   const pause = parseInt($("f-pause").value || "0", 10);
   if (!Z.istDatum(datum)) return formularFehler("Bitte ein Datum angeben.");
@@ -499,6 +555,9 @@ const AKTIONEN = {
     state.monat = d.getFullYear() + "-" + Z.pad(d.getMonth() + 1);
     render();
   },
+  "zeit-schritt": (w, el) => zeitSchrittAusfuehren(el.dataset.feld, Number(w)),
+  "pause-schritt": (w) => pauseSchrittAusfuehren(Number(w)),
+  "schritt-wahl": (w) => { state.einst.schritt = Number(w); schrittAnzeigen(); speichern(); },
   zettel: zettelOeffnen,
   "zettel-zu": () => $("sheet").classList.remove("offen"),
   pdf: pdfTeilen,
@@ -513,7 +572,7 @@ const AKTIONEN = {
 document.addEventListener("click", (ev) => {
   const el = ev.target.closest("[data-aktion]");
   if (!el || !AKTIONEN[el.dataset.aktion]) return;
-  AKTIONEN[el.dataset.aktion](el.dataset.wert);
+  AKTIONEN[el.dataset.aktion](el.dataset.wert, el);
 });
 
 document.addEventListener("change", (ev) => {
@@ -527,6 +586,26 @@ document.addEventListener("input", (ev) => {
   state.einst[feld] = ev.target.value;
   clearTimeout(einstellungsTimer);
   einstellungsTimer = setTimeout(speichern, 400);
+});
+
+// Zeitfelder: Beim Antippen eines leeren Felds erscheint der Startwert (beim Ende der Beginn), beim Verlassen
+// ohne Änderung wird er wieder entfernt, damit kein ungewollter Eintrag entsteht.
+document.addEventListener("focusin", (ev) => {
+  const el = ev.target;
+  if (!el.classList || !el.classList.contains("zeit") || el.value.trim()) return;
+  el.value = zeitBasis(el.id);
+  el.dataset.vorschlag = "1";
+  setTimeout(() => el.select(), 0);
+});
+document.addEventListener("focusout", (ev) => {
+  const el = ev.target;
+  if (!el.classList || !el.classList.contains("zeit")) return;
+  if (el.dataset.vorschlag === "1") { el.value = ""; return; }
+  const z = Z.parseZeitEingabe(el.value);
+  if (z) el.value = z;
+});
+document.addEventListener("input", (ev) => {
+  if (ev.target.classList && ev.target.classList.contains("zeit")) ev.target.dataset.vorschlag = "0";
 });
 
 $("datei").addEventListener("change", (ev) => wiederherstellen(ev.target.files[0]));

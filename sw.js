@@ -1,5 +1,5 @@
 /* Offline-Zwischenspeicher: sofort aus dem Cache laden, im Hintergrund aktualisieren. */
-const CACHE = "zeiterfassung-v3";
+const CACHE = "zeiterfassung-v4";
 const DATEIEN = ["./", "index.html", "logik.js", "pdf.js","manifest.webmanifest", "icon-180.png", "icon-192.png", "icon-512.png"];
 
 self.addEventListener("install", (ev) => {
