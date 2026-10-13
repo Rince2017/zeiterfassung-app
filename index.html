@@ -45,6 +45,9 @@ button.ende { background: var(--gut); border-color: var(--gut); color: #fff; }
 button.gefahr { color: var(--fehler); }
 button.breit { width: 100%; }
 button:active { opacity: .7; }
+/* Schnelles Mehrfachtippen (− / +) soll nicht zoomen oder Text markieren */
+button, input, select, nav, .zeile, .chip { touch-action: manipulation; -webkit-user-select: none; user-select: none; }
+input, select { -webkit-user-select: auto; user-select: auto; }
 .reihe { display: flex; gap: 8px; flex-wrap: wrap; }
 .reihe > * { flex: 1 1 auto; }
 .chip { min-height: 44px; padding: 0 14px; flex: 0 0 auto; }
@@ -163,10 +166,10 @@ dialog::backdrop { background: rgba(0, 0, 0, .5); }
   <div class="papier" id="sheet-inhalt"></div>
 </section>
 
-<input id="datei" type="file" accept=".csv,text/csv,text/plain" hidden>
+<input id="datei" type="file" multiple accept=".csv,.json,text/csv,application/json,text/plain" hidden>
 
-<script src="logik.js?v=4"></script>
-<script src="pdf.js?v=4"></script>
+<script src="logik.js?v=5"></script>
+<script src="pdf.js?v=5"></script>
 <script>
 "use strict";
 const Z = window.Zeit;
@@ -335,9 +338,9 @@ function ansichtEinstellungen() {
     '<label for="e-pers">Personalnummer</label><input id="e-pers" data-feld="pers_nr" autocomplete="off" value="' + esc(e.pers_nr) + '"></div>' +
     '<div class="karte"><strong>Sicherung</strong><p class="leise">Die Daten liegen nur auf diesem Gerät. Letzte Sicherung: ' + s + ".</p>" +
     '<button class="haupt breit" data-aktion="sichern">Sichern (in „Dateien“ ablegen)</button>' +
-    '<p class="leise">Wählen Sie im Menü „In Dateien sichern“ und dann einen Ordner in iCloud Drive.</p>' +
-    '<button class="breit" data-aktion="wiederherstellen">Aus Datei wiederherstellen</button>' +
-    '<p class="leise">Bereits vorhandene Einträge bleiben erhalten, nur neue werden ergänzt.</p></div>' +
+    '<p class="leise">Es entstehen zwei Dateien: die Einträge (.csv) und die Angaben für den Stundenzettel (.json). Wählen Sie im Menü „In Dateien sichern“ und dann einen Ordner in iCloud Drive.</p>' +
+    '<button class="breit" data-aktion="wiederherstellen">Aus Dateien wiederherstellen</button>' +
+    '<p class="leise">Wählen Sie beide Dateien gemeinsam aus. Bereits vorhandene Einträge bleiben erhalten, nur neue werden ergänzt.</p></div>' +
     '<div class="karte"><button class="gefahr breit" data-aktion="alles-loeschen">Alle Daten auf diesem Gerät löschen</button></div>' +
     '<p class="leise" style="text-align:center">Version ' + VERSION + "</p>";
 }
@@ -506,33 +509,65 @@ async function pdfTeilen() {
 async function sichern() {
   const heute = Z.heuteIso();
   const name = (state.einst.name || "daten").toLowerCase().replace(/[^a-z0-9äöüß]+/g, "_").replace(/^_|_$/g, "") || "daten";
-  const datei = new File(["﻿" + Z.toCsv(state.eintraege)], "zeiterfassung_" + name + "_" + heute + ".csv", { type: "text/csv" });
+  const basis = "zeiterfassung_" + name + "_" + heute;
+  const dateien = [
+    new File(["\uFEFF" + Z.toCsv(state.eintraege)], basis + ".csv", { type: "text/csv" }),
+    new File([Z.einstellungenZuJson(state.einst)], basis + "_einstellungen.json", { type: "application/json" }),
+  ];
   let geschafft = false;
-  if (navigator.canShare && navigator.canShare({ files: [datei] })) {
-    try { await navigator.share({ files: [datei] }); geschafft = true; }
+  if (navigator.canShare && navigator.canShare({ files: dateien })) {
+    try { await navigator.share({ files: dateien }); geschafft = true; }
     catch (e) { if (e.name === "AbortError") return; }
   }
-  if (!geschafft) { dateiHerunterladen(datei); geschafft = true; }
+  if (!geschafft) dateien.forEach((d, i) => setTimeout(() => dateiHerunterladen(d), i * 400));
   state.einst.letzteSicherung = heute;
   await speichern();
   render();
-  toast("Sicherung angelegt.");
+  toast("Sicherung angelegt (zwei Dateien).");
 }
 
-async function wiederherstellen(datei) {
-  if (!datei) return;
-  const ergebnis = Z.parseCsv(await datei.text());
-  if (!ergebnis.eintraege.length) {
-    alert(ergebnis.fehler.length ? ergebnis.fehler.slice(0, 5).join("\n") : "Die Datei enthält keine Einträge.");
-    return;
+/** Übernimmt die Angaben aus der Einstellungsdatei; bei abweichenden vorhandenen Angaben wird nachgefragt. */
+function einstellungenUebernehmen(s) {
+  const felder = ["name", "firma", "pers_nr"];
+  const abweichend = felder.some((k) => state.einst[k] && s[k] && state.einst[k] !== s[k]);
+  if (abweichend && !confirm("Die gesicherten Angaben für den Stundenzettel weichen von den aktuellen ab. Aktuelle Angaben ersetzen?")) return false;
+  felder.forEach((k) => { if (s[k]) state.einst[k] = s[k]; });
+  if (s.schritt) state.einst.schritt = s.schritt;
+  return true;
+}
+
+async function wiederherstellen(dateien) {
+  if (!dateien || !dateien.length) return;
+  const meldungen = [];
+  let einstellungen = false;
+  let eintraegeGelesen = false;
+  for (const datei of Array.from(dateien)) {
+    const text = await datei.text();
+    if (/\.json$/i.test(datei.name) || datei.type === "application/json") {
+      const s = Z.parseEinstellungen(text);
+      if (!s) { alert("„" + datei.name + "“ ist keine Einstellungsdatei dieser App."); continue; }
+      if (einstellungenUebernehmen(s)) { einstellungen = true; meldungen.push("Angaben für den Stundenzettel übernommen."); }
+      continue;
+    }
+    const ergebnis = Z.parseCsv(text);
+    if (!ergebnis.eintraege.length) {
+      alert(ergebnis.fehler.length ? ergebnis.fehler.slice(0, 5).join("\n") : "„" + datei.name + "“ enthält keine Einträge.");
+      continue;
+    }
+    const z = Z.zusammenfuehren(state.eintraege, ergebnis.eintraege);
+    state.eintraege = z.liste;
+    eintraegeGelesen = true;
+    let m = z.hinzugefuegt + " Einträge ergänzt, " + z.doppelt + " waren schon vorhanden.";
+    if (ergebnis.fehler.length) m += " " + ergebnis.fehler.length + " Zeilen übersprungen.";
+    meldungen.unshift(m);
   }
-  const z = Z.zusammenfuehren(state.eintraege, ergebnis.eintraege);
-  state.eintraege = z.liste;
+  if (!meldungen.length) return;
   await speichern();
   render();
-  let text = z.hinzugefuegt + " Einträge ergänzt, " + z.doppelt + " waren schon vorhanden.";
-  if (ergebnis.fehler.length) text += " " + ergebnis.fehler.length + " Zeilen übersprungen.";
-  toast(text);
+  if (eintraegeGelesen && !einstellungen && !state.einst.name) {
+    meldungen.push("Name, Firma und Personalnummer fehlen noch: unter „Einstellungen“ eintragen oder die Datei „…_einstellungen.json“ mit auswählen.");
+  }
+  toast(meldungen.join(" "));
 }
 
 async function allesLoeschen() {
@@ -608,7 +643,7 @@ document.addEventListener("input", (ev) => {
   if (ev.target.classList && ev.target.classList.contains("zeit")) ev.target.dataset.vorschlag = "0";
 });
 
-$("datei").addEventListener("change", (ev) => wiederherstellen(ev.target.files[0]));
+$("datei").addEventListener("change", (ev) => wiederherstellen(ev.target.files));
 
 // ---------- Start ----------
 

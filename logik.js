@@ -172,6 +172,29 @@
     return { liste: ergebnis, hinzugefuegt: hinzu, doppelt: neu.length - hinzu };
   }
 
+  // ---------- Einstellungen (zweite Sicherungsdatei) ----------
+
+  const EINST_FELDER = ["name", "firma", "pers_nr"];
+
+  /** Angaben für den Stundenzettel und der Minutenschritt als JSON-Text. */
+  function einstellungenZuJson(einst) {
+    const daten = { typ: "zeiterfassung-einstellungen", version: 1 };
+    EINST_FELDER.forEach((k) => { daten[k] = String(einst[k] || ""); });
+    daten.schritt = [1, 15, 30].indexOf(einst.schritt) >= 0 ? einst.schritt : 15;
+    return JSON.stringify(daten, null, 2) + "\n";
+  }
+
+  /** Liest die Einstellungsdatei; null, wenn sie nicht stimmt. Es werden nur bekannte Felder übernommen. */
+  function parseEinstellungen(text) {
+    let d;
+    try { d = JSON.parse(String(text).replace(/^\uFEFF/, "")); } catch (e) { return null; }
+    if (!d || d.typ !== "zeiterfassung-einstellungen") return null;
+    const aus = {};
+    EINST_FELDER.forEach((k) => { aus[k] = typeof d[k] === "string" ? d[k].slice(0, 200) : ""; });
+    if ([1, 15, 30].indexOf(d.schritt) >= 0) aus.schritt = d.schritt;
+    return aus;
+  }
+
   // ---------- CSV ----------
 
   function csvZeilen(text, trenner) {
@@ -326,6 +349,6 @@
     SPALTEN, KUERZEL, WOCHENTAGE, FRIST_TAGE, ZETTEL_CSS,
     esc, pad, heuteIso, jetztHhmm, istDatum, addTage, tageZwischen, wochentag, tageImMonat,
     normZeit, parseZeitEingabe, zeitSchritt, minutenSchritt, minuten, dauerMin, hhmm, datumDe, verspaetet, sortiere, imMonat,
-    zusammenfuehren, parseCsv, toCsv, neueId, zeilenDaten, zeilenHtml, zettelHtml,
+    zusammenfuehren, einstellungenZuJson, parseEinstellungen, parseCsv, toCsv, neueId, zeilenDaten, zeilenHtml, zettelHtml,
   };
 });
